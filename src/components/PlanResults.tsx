@@ -82,6 +82,7 @@ export function PlanResults({
   const stats = calculateFieldPlayCounts(roster, plan);
   const selectedSlot = activeQuarter.lineup.find((slot) => slot.slotId === selectedSlotId) ?? null;
   const selectablePlayers = [...roster.players].sort((left, right) => compareText(left.name, right.name));
+  const benchPlayerIds = new Set(activeQuarter.bench.map((player) => player.id));
   const sortedPlayers = useMemo(
     () => sortPlayersByFieldPlayCounts(roster.players, stats, sortDirection),
     [roster.players, stats, sortDirection]
@@ -295,7 +296,7 @@ export function PlanResults({
                 >
                   {selectablePlayers.map((player) => (
                     <option key={player.id} value={player.id}>
-                      {player.name} ({player.primaryPosition})
+                      {benchPlayerIds.has(player.id) ? `${player.name} (벤치)` : player.name}
                     </option>
                   ))}
                 </select>
@@ -463,10 +464,10 @@ export function PlanResults({
           {sortedPlayers.map((player) => {
             const playerStats = stats[player.id];
             return (
-              <article key={player.id} className="list-card">
+              <article key={player.id} className="list-card player-status-card">
                 <div>
-                  <strong>{player.name}</strong>
-                  <p className="muted">
+                  <strong className="player-status-card__name">{player.name}</strong>
+                  <p className="muted player-status-card__meta">
                     필드 출전 {playerStats.fieldPlayQuarters}쿼터
                     {playerStats.temporaryGkQuarters > 0 ? ` / 임시 GK ${playerStats.temporaryGkQuarters}쿼터` : ''}
                   </p>
