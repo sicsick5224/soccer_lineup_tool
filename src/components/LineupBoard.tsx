@@ -145,14 +145,12 @@ export function LineupBoard({
           }
 
           const isSubstituted = substitutionSlotIds.includes(slot.slotId);
-          const isDragged =
-            dragState?.item.type === 'slot' && dragState.item.slotId === slot.slotId;
+          const isDragged = dragState?.item.type === 'slot' && dragState.item.slotId === slot.slotId;
 
           const markerClassName = [
             'player-marker',
             slot.isLocked ? 'player-marker--locked' : '',
             selectedSlotId === slot.slotId ? 'player-marker--selected' : '',
-            isEditing ? 'player-marker--editable' : '',
             isDragged ? 'player-marker--dragging' : '',
             dragState?.overSlotId === slot.slotId ? 'player-marker--drop-target' : ''
           ]
@@ -160,36 +158,38 @@ export function LineupBoard({
             .join(' ');
 
           return (
-            <button
-              key={slot.slotId}
-              type="button"
-              data-slot-id={slot.slotId}
-              className={markerClassName}
-              style={{ left: `${position.x}%`, top: `${position.y}%` }}
-              onClick={() => {
-                if (isEditing) {
-                  onSelectSlot(slot.slotId);
-                }
-              }}
-              onPointerDown={(event) => {
-                if (slot.player) {
-                  handlePointerDown(event, {
-                    type: 'slot',
-                    slotId: slot.slotId,
-                    playerId: slot.player.id,
-                    playerName: slot.player.name
-                  });
-                }
-              }}
-            >
-              {isSubstituted ? <span className="player-marker__substitution-dot" aria-hidden="true" /> : null}
-              <img className="kit-icon" src={uniformIcon} alt="" aria-hidden="true" />
-              <span className="player-marker__name">{slot.player?.name ?? slot.label}</span>
-              <span className="player-marker__meta">
-                {slot.position}
-                {slot.isLocked ? ' · 고정' : ''}
-              </span>
-            </button>
+            <div key={slot.slotId} className={markerClassName} style={{ left: `${position.x}%`, top: `${position.y}%` }}>
+              <button
+                type="button"
+                data-slot-id={slot.slotId}
+                className={`player-marker__hitbox ${isEditing ? 'player-marker__hitbox--editable' : ''}`}
+                onClick={() => {
+                  if (isEditing) {
+                    onSelectSlot(slot.slotId);
+                  }
+                }}
+                onPointerDown={(event) => {
+                  if (slot.player) {
+                    handlePointerDown(event, {
+                      type: 'slot',
+                      slotId: slot.slotId,
+                      playerId: slot.player.id,
+                      playerName: slot.player.name
+                    });
+                  }
+                }}
+              >
+                {isSubstituted ? <span className="player-marker__substitution-dot" aria-hidden="true" /> : null}
+                <img className="kit-icon" src={uniformIcon} alt="" aria-hidden="true" />
+              </button>
+              <div className="player-marker__label" aria-hidden="true">
+                <span className="player-marker__name">{slot.player?.name ?? slot.label}</span>
+                <span className="player-marker__meta">
+                  {slot.position}
+                  {slot.isLocked ? ' · 고정' : ''}
+                </span>
+              </div>
+            </div>
           );
         })}
       </div>

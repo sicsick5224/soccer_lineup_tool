@@ -302,22 +302,8 @@ select {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.2rem;
-  min-width: 82px;
-  padding: 0;
-  background: transparent;
-  border: 0;
   transform: translate(-50%, -50%);
-  box-shadow: none;
-  touch-action: none;
-}
-
-.player-marker:hover {
-  filter: none;
-}
-
-.player-marker--editable {
-  cursor: pointer;
+  pointer-events: none;
 }
 
 .player-marker--dragging {
@@ -338,13 +324,45 @@ select {
 
 .player-marker__substitution-dot {
   position: absolute;
-  top: -6px;
-  right: 20px;
+  top: -4px;
+  right: -2px;
   width: 10px;
   height: 10px;
   border-radius: 999px;
   background: #ffc400;
   box-shadow: 0 0 0 2px rgba(20, 33, 61, 0.35);
+}
+
+.player-marker__hitbox {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.player-marker__hitbox:hover {
+  filter: none;
+}
+
+.player-marker__hitbox--editable {
+  cursor: pointer;
+}
+
+.player-marker__label {
+  margin-top: 0.15rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 64px;
+  pointer-events: none;
 }
 
 .kit-icon {
@@ -560,6 +578,19 @@ select {
   color: var(--warning);
 }
 
+.panel > .panel-header > .button-row {
+  display: grid;
+  grid-template-columns: auto auto;
+  justify-content: end;
+  justify-items: end;
+  align-items: start;
+}
+
+.panel > .panel-header > .button-row .status-pill {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
 .substitution-summary {
   margin-top: 0.9rem;
   border: 1px solid rgba(217, 224, 234, 0.85);
@@ -762,12 +793,21 @@ select {
   }
 
   .player-marker {
-    min-width: 58px;
+    transform: translate(-50%, -42%);
   }
 
   .kit-icon {
     width: 28px;
     height: 28px;
+  }
+
+  .player-marker__hitbox {
+    width: 38px;
+    height: 38px;
+  }
+
+  .player-marker__label {
+    min-width: 52px;
   }
 
   .player-marker__name {
@@ -782,8 +822,8 @@ select {
   }
 
   .player-marker__substitution-dot {
-    top: -4px;
-    right: 13px;
+    top: -2px;
+    right: 1px;
     width: 8px;
     height: 8px;
   }
@@ -807,6 +847,11 @@ select {
   .status-pill {
     padding: 0.2rem 0.52rem;
     font-size: 0.68rem;
+  }
+
+  .panel > .panel-header > .button-row {
+    grid-template-columns: auto auto;
+    gap: 0.45rem;
   }
 
   .substitution-summary {
