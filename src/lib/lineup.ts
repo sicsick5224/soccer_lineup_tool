@@ -2,6 +2,7 @@ import { FORMATIONS, QUARTER_DURATION_MINUTES, QUARTERS, getFormationSlots } fro
 import { compareText, createId, nowIso } from './utils';
 import type {
   Assignment,
+  BoardDragItem,
   FormationSlot,
   FormationType,
   GenerationWarning,
@@ -10,6 +11,7 @@ import type {
   PlayerStats,
   QuarterIndex,
   QuarterPlan,
+  QuarterSubstitutionView,
   QuarterView,
   TeamRoster
 } from '../types/domain';
@@ -58,6 +60,7 @@ export function calculateFieldPlayCounts(roster: TeamRoster, matchPlan: MatchPla
         playerId: player.id,
         fieldPlayQuarters: 0,
         temporaryGkQuarters: 0,
+        substitutionQuarters: 0,
         primaryGk: player.primaryPosition === 'GK'
       } satisfies PlayerStats
     ])
@@ -77,6 +80,23 @@ export function calculateFieldPlayCounts(roster: TeamRoster, matchPlan: MatchPla
         stats[player.id].fieldPlayQuarters += 1;
       }
     }
+  }
+
+  const substitutionQuarterSets = new Map<string, Set<QuarterIndex>>();
+  for (const substitution of matchPlan.midGameSubstitutions) {
+    for (const playerId of [substitution.outPlayerId, substitution.inPlayerId]) {
+      if (!stats[playerId]) {
+        continue;
+      }
+
+      const quarterSet = substitutionQuarterSets.get(playerId) ?? new Set<QuarterIndex>();
+      quarterSet.add(substitution.quarterIndex);
+      substitutionQuarterSets.set(playerId, quarterSet);
+    }
+  }
+
+  for (const [playerId, quarterSet] of substitutionQuarterSets.entries()) {
+    stats[playerId].substitutionQuarters = quarterSet.size;
   }
 
   return stats;
@@ -314,6 +334,10 @@ export function getQuarterViews(roster: TeamRoster, matchPlan: MatchPlan): Quart
   });
 }
 
+export function hasTemporaryPlacementWarnings(roster: TeamRoster, matchPlan: MatchPlan): boolean {
+  return getQuarterViews(roster, matchPlan).some((quarterView) => quarterView.warnings.length > 0);
+}
+
 export function createEmptyPlan(rosterId: string): MatchPlan {
   const timestamp = nowIso();
   return {
@@ -363,4 +387,112 @@ export function sortPlayersByFieldPlayCounts(
 
     return compareText(left.name, right.name);
   });
+}
+
+export function assignPlayerToSlot(quarterPlan: QuarterPlan, slotId: string, playerId: string): QuarterPlan {
+  const currentAssignment = quarterPlan.assignments.find((assignment) => assignment.slotId === slotId);
+  const existingPlayerAssignment = quarterPlan.assignments.find((assignment) => assignment.playerId === playerId);
+
+  if (!currentAssignment || currentAssignment.playerId === playerId) {
+    return quarterPlan;
+  }
+
+  return {
+    ...quarterPlan,
+    assignments: quarterPlan.assignments.map((assignment) => {
+      if (assignment.slotId === slotId) {
+        return { ...assignment, playerId };
+      }
+
+      if (
+        existingPlayerAssignment &&
+        assignment.slotId === existingPlayerAssignment.slotId &&
+        existingPlayerAssignment.slotId !== slotId
+      ) {
+        return { ...assignment, playerId: currentAssignment.playerId };
+      }
+
+      return assignment;
+    })
+  };
+}
+
+export function applyDragItemToQuarterPlan(
+  quarterPlan: QuarterPlan,
+  dragItem: BoardDragItem,
+  targetSlotId: string
+): QuarterPlan {
+  const targetAssignment = quarterPlan.assignments.find((assignment) => assignment.slotId === targetSlotId);
+  if (!targetAssignment) {
+    return quarterPlan;
+  }
+
+  if (dragItem.type === 'bench') {
+    return assignPlayerToSlot(quarterPlan, targetSlotId, dragItem.playerId);
+  }
+
+  if (dragItem.slotId === targetSlotId) {
+    return quarterPlan;
+  }
+
+  const sourceAssignment = quarterPlan.assignments.find((assignment) => assignment.slotId === dragItem.slotId);
+  if (!sourceAssignment) {
+    return quarterPlan;
+  }
+
+  return {
+    ...quarterPlan,
+    assignments: quarterPlan.assignments.map((assignment) => {
+      if (assignment.slotId === dragItem.slotId) {
+        return { ...assignment, playerId: targetAssignment.playerId };
+      }
+
+      if (assignment.slotId === targetSlotId) {
+        return { ...assignment, playerId: sourceAssignment.playerId };
+      }
+
+      return assignment;
+    })
+  };
+}
+
+export function getQuarterSubstitutionViews(
+  roster: TeamRoster,
+  matchPlan: MatchPlan,
+  quarterIndex: QuarterIndex
+): QuarterSubstitutionView[] {
+  const slotLabelById = new Map(getFormationSlots(matchPlan.formation).map((slot) => [slot.slotId, slot.label]));
+  const playerById = new Map(roster.players.map((player) => [player.id, player]));
+
+  return matchPlan.midGameSubstitutions
+    .filter((substitution) => substitution.quarterIndex === quarterIndex)
+    .sort((left, right) => {
+      const minuteDiff = left.minuteOffset - right.minuteOffset;
+      if (minuteDiff !== 0) {
+        return minuteDiff;
+      }
+
+      return compareText(left.id, right.id);
+    })
+    .map((substitution) => ({
+      id: substitution.id,
+      minuteOffset: substitution.minuteOffset,
+      outPlayerId: substitution.outPlayerId,
+      outPlayerName: playerById.get(substitution.outPlayerId)?.name ?? substitution.outPlayerId,
+      inPlayerId: substitution.inPlayerId,
+      inPlayerName: playerById.get(substitution.inPlayerId)?.name ?? substitution.inPlayerId,
+      slotId: substitution.slotId,
+      slotLabel: substitution.slotId ? slotLabelById.get(substitution.slotId) : undefined,
+      note: substitution.note
+    }));
+}
+
+export function getSubstitutionSlotIds(matchPlan: MatchPlan, quarterIndex: QuarterIndex): string[] {
+  return Array.from(
+    new Set(
+      matchPlan.midGameSubstitutions
+        .filter((substitution) => substitution.quarterIndex === quarterIndex && substitution.slotId)
+        .map((substitution) => substitution.slotId as string)
+    )
+  );
 }

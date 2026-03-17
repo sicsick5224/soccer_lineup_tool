@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { calculateFieldPlayCounts, generateMatchPlan, recalculateMatchPlan, sortPlayersByFieldPlayCounts } from './lineup';
-import type { MatchPlan, TeamRoster } from '../types/domain';
+import {
+  applyDragItemToQuarterPlan,
+  calculateFieldPlayCounts,
+  generateMatchPlan,
+  getQuarterSubstitutionViews,
+  getSubstitutionSlotIds,
+  recalculateMatchPlan,
+  sortPlayersByFieldPlayCounts
+} from './lineup';
+import type { MatchPlan, QuarterPlan, TeamRoster } from '../types/domain';
 
 const rosterWithPrimaryGk: TeamRoster = {
   id: 'roster-1',
-  name: '테스트',
+  name: 'Test Roster',
   createdAt: '2026-03-13T00:00:00.000Z',
   updatedAt: '2026-03-13T00:00:00.000Z',
   players: [
@@ -34,7 +42,7 @@ const rosterWithoutPrimaryGk: TeamRoster = {
 describe('lineup engine', () => {
   it('creates four quarter lineups', () => {
     const result = generateMatchPlan({
-      title: '테스트 경기',
+      title: 'Match',
       roster: rosterWithPrimaryGk,
       formation: '4-2-3-1',
       gkCandidates: []
@@ -46,7 +54,7 @@ describe('lineup engine', () => {
 
   it('excludes temporary goalkeeper quarters from field counts', () => {
     const result = generateMatchPlan({
-      title: '임시 GK 테스트',
+      title: 'Temporary GK',
       roster: rosterWithoutPrimaryGk,
       formation: '4-2-3-1',
       gkCandidates: ['st-1']
@@ -59,7 +67,7 @@ describe('lineup engine', () => {
 
   it('counts primary goalkeeper quarters as normal participation', () => {
     const result = generateMatchPlan({
-      title: '주 GK 테스트',
+      title: 'Primary GK',
       roster: rosterWithPrimaryGk,
       formation: '4-2-3-1',
       gkCandidates: []
@@ -70,9 +78,40 @@ describe('lineup engine', () => {
     expect(stats['gk-1'].temporaryGkQuarters).toBe(0);
   });
 
+  it('counts substitution participation by unique quarters for both in and out players', () => {
+    const plan: MatchPlan = {
+      id: 'plan-sub',
+      title: 'Sub Match',
+      rosterId: rosterWithPrimaryGk.id,
+      formation: '4-2-3-1',
+      quarterDurationMinutes: 25,
+      quarterCount: 4,
+      gkCandidates: [],
+      createdAt: '2026-03-13T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+      quarterPlans: [
+        { quarterIndex: 1, lockedSlotIds: [], assignments: [] },
+        { quarterIndex: 2, lockedSlotIds: [], assignments: [] },
+        { quarterIndex: 3, lockedSlotIds: [], assignments: [] },
+        { quarterIndex: 4, lockedSlotIds: [], assignments: [] }
+      ],
+      midGameSubstitutions: [
+        { id: 'sub-1', quarterIndex: 1, minuteOffset: 5, outPlayerId: 'lw-1', inPlayerId: 'cm-1' },
+        { id: 'sub-2', quarterIndex: 1, minuteOffset: 14, outPlayerId: 'cm-1', inPlayerId: 'dm-1' },
+        { id: 'sub-3', quarterIndex: 2, minuteOffset: 8, outPlayerId: 'lw-1', inPlayerId: 'cm-1' }
+      ]
+    };
+
+    const stats = calculateFieldPlayCounts(rosterWithPrimaryGk, plan);
+
+    expect(stats['lw-1'].substitutionQuarters).toBe(2);
+    expect(stats['cm-1'].substitutionQuarters).toBe(2);
+    expect(stats['dm-1'].substitutionQuarters).toBe(1);
+  });
+
   it('keeps locked slots during recalculation', () => {
     const result = generateMatchPlan({
-      title: '잠금 테스트',
+      title: 'Locked Slot',
       roster: rosterWithPrimaryGk,
       formation: '4-2-3-1',
       gkCandidates: []
@@ -101,9 +140,9 @@ describe('lineup engine', () => {
 
   it('sorts player status rows by field play count with stable name tiebreaker', () => {
     const stats = {
-      alpha: { playerId: 'alpha', fieldPlayQuarters: 2, temporaryGkQuarters: 0, primaryGk: false },
-      bravo: { playerId: 'bravo', fieldPlayQuarters: 4, temporaryGkQuarters: 0, primaryGk: false },
-      charlie: { playerId: 'charlie', fieldPlayQuarters: 2, temporaryGkQuarters: 1, primaryGk: false }
+      alpha: { playerId: 'alpha', fieldPlayQuarters: 2, temporaryGkQuarters: 0, substitutionQuarters: 0, primaryGk: false },
+      bravo: { playerId: 'bravo', fieldPlayQuarters: 4, temporaryGkQuarters: 0, substitutionQuarters: 1, primaryGk: false },
+      charlie: { playerId: 'charlie', fieldPlayQuarters: 2, temporaryGkQuarters: 1, substitutionQuarters: 0, primaryGk: false }
     };
     const players = [
       { id: 'charlie', name: 'Charlie', primaryPosition: 'CM' as const, secondaryPositions: [] },
@@ -116,5 +155,104 @@ describe('lineup engine', () => {
 
     expect(ascending.map((player) => player.name)).toEqual(['Alpha', 'Charlie', 'Bravo']);
     expect(descending.map((player) => player.name)).toEqual(['Bravo', 'Alpha', 'Charlie']);
+  });
+
+  it('swaps field players when dragging between slots', () => {
+    const quarterPlan: QuarterPlan = {
+      quarterIndex: 1,
+      lockedSlotIds: [],
+      assignments: [
+        { slotId: 'LW-1', playerId: 'lw-1' },
+        { slotId: 'ST-1', playerId: 'st-1' },
+        { slotId: 'RW-1', playerId: 'rw-1' }
+      ]
+    };
+
+    const nextQuarterPlan = applyDragItemToQuarterPlan(
+      quarterPlan,
+      { type: 'slot', slotId: 'LW-1', playerId: 'lw-1', playerName: 'LW1' },
+      'RW-1'
+    );
+
+    expect(nextQuarterPlan.assignments).toEqual([
+      { slotId: 'LW-1', playerId: 'rw-1' },
+      { slotId: 'ST-1', playerId: 'st-1' },
+      { slotId: 'RW-1', playerId: 'lw-1' }
+    ]);
+  });
+
+  it('assigns a bench player into a field slot when dropped on the board', () => {
+    const quarterPlan: QuarterPlan = {
+      quarterIndex: 1,
+      lockedSlotIds: ['ST-1'],
+      assignments: [
+        { slotId: 'LW-1', playerId: 'lw-1' },
+        { slotId: 'ST-1', playerId: 'st-1' },
+        { slotId: 'RW-1', playerId: 'rw-1' }
+      ]
+    };
+
+    const nextQuarterPlan = applyDragItemToQuarterPlan(
+      quarterPlan,
+      { type: 'bench', playerId: 'cm-1', playerName: 'CM1' },
+      'ST-1'
+    );
+
+    expect(nextQuarterPlan.lockedSlotIds).toEqual(['ST-1']);
+    expect(nextQuarterPlan.assignments).toEqual([
+      { slotId: 'LW-1', playerId: 'lw-1' },
+      { slotId: 'ST-1', playerId: 'cm-1' },
+      { slotId: 'RW-1', playerId: 'rw-1' }
+    ]);
+  });
+
+  it('creates sorted substitution views and slot badges for the active quarter', () => {
+    const plan: MatchPlan = {
+      id: 'plan-1',
+      title: 'Match',
+      rosterId: rosterWithPrimaryGk.id,
+      formation: '4-2-3-1',
+      quarterDurationMinutes: 25,
+      quarterCount: 4,
+      gkCandidates: [],
+      createdAt: '2026-03-13T00:00:00.000Z',
+      updatedAt: '2026-03-13T00:00:00.000Z',
+      quarterPlans: [],
+      midGameSubstitutions: [
+        {
+          id: 'sub-2',
+          quarterIndex: 1,
+          minuteOffset: 10,
+          outPlayerId: 'st-1',
+          inPlayerId: 'cm-1',
+          slotId: 'ST-1'
+        },
+        {
+          id: 'sub-1',
+          quarterIndex: 1,
+          minuteOffset: 5,
+          outPlayerId: 'lw-1',
+          inPlayerId: 'dm-1',
+          slotId: 'LW-1'
+        },
+        {
+          id: 'sub-3',
+          quarterIndex: 2,
+          minuteOffset: 7,
+          outPlayerId: 'rw-1',
+          inPlayerId: 'am-1',
+          slotId: 'RW-1'
+        }
+      ]
+    };
+
+    const substitutionViews = getQuarterSubstitutionViews(rosterWithPrimaryGk, plan, 1);
+    const substitutionSlotIds = getSubstitutionSlotIds(plan, 1);
+
+    expect(substitutionViews.map((item) => item.minuteOffset)).toEqual([5, 10]);
+    expect(substitutionViews.map((item) => item.slotLabel)).toEqual(['LW', 'ST']);
+    expect(substitutionViews[0].outPlayerName).toBe('LW1');
+    expect(substitutionViews[1].inPlayerName).toBe('CM1');
+    expect(substitutionSlotIds).toEqual(['ST-1', 'LW-1']);
   });
 });

@@ -76,7 +76,40 @@ export interface PlayerStats {
   playerId: string;
   fieldPlayQuarters: number;
   temporaryGkQuarters: number;
+  substitutionQuarters: number;
   primaryGk: boolean;
+}
+
+export interface QuarterSubstitutionView {
+  id: string;
+  minuteOffset: number;
+  outPlayerId: string;
+  outPlayerName: string;
+  inPlayerId: string;
+  inPlayerName: string;
+  slotId?: string;
+  slotLabel?: string;
+  note?: string;
+}
+
+export type BoardDragItem =
+  | {
+      type: 'slot';
+      slotId: string;
+      playerId: string;
+      playerName: string;
+    }
+  | {
+      type: 'bench';
+      playerId: string;
+      playerName: string;
+    };
+
+export interface BoardDragState {
+  item: BoardDragItem;
+  x: number;
+  y: number;
+  overSlotId: string | null;
 }
 
 export interface QuarterView {

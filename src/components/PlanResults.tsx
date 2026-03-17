@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  applyDragItemToQuarterPlan,
+  assignPlayerToSlot,
   calculateFieldPlayCounts,
+  getQuarterSubstitutionViews,
   getQuarterViews,
+  hasTemporaryPlacementWarnings,
+  getSubstitutionSlotIds,
   recalculateMatchPlan,
   sortPlayersByFieldPlayCounts,
   type PlayerStatsSortDirection
@@ -9,7 +14,15 @@ import {
 import { compareText, createId, nowIso } from '../lib/utils';
 import { validateSubstitution } from '../lib/validation';
 import { LineupBoard } from './LineupBoard';
-import type { MatchPlan, MidGameSubstitution, QuarterIndex, TeamRoster } from '../types/domain';
+import type {
+  BoardDragItem,
+  BoardDragState,
+  MatchPlan,
+  MidGameSubstitution,
+  QuarterIndex,
+  QuarterPlan,
+  TeamRoster
+} from '../types/domain';
 
 interface PlanResultsProps {
   roster: TeamRoster | null;
@@ -42,6 +55,10 @@ function createSubstitutionDraft(quarterIndex: QuarterIndex): SubstitutionDraft 
   };
 }
 
+function getTemporaryPlacementNoticeKey(planId: string): string {
+  return `soccer-lineup-tool:dismissed-temp-placement:${planId}`;
+}
+
 export function PlanResults({
   roster,
   plan,
@@ -55,20 +72,100 @@ export function PlanResults({
   const [sortDirection, setSortDirection] = useState<PlayerStatsSortDirection>('field-desc');
   const [substitutionDraft, setSubstitutionDraft] = useState<SubstitutionDraft>(createSubstitutionDraft(selectedQuarter));
   const [error, setError] = useState<string | null>(null);
+  const [dragState, setDragState] = useState<BoardDragState | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [isTemporaryPlacementNoticeDismissed, setIsTemporaryPlacementNoticeDismissed] = useState(false);
+  const [hasLoadedTemporaryPlacementNoticePreference, setHasLoadedTemporaryPlacementNoticePreference] = useState(false);
 
   useEffect(() => {
-    setSubstitutionDraft((currentDraft) => ({ ...currentDraft, quarterIndex: selectedQuarter }));
+    setSubstitutionDraft((currentDraft) =>
+      currentDraft.id ? { ...currentDraft, quarterIndex: selectedQuarter } : createSubstitutionDraft(selectedQuarter)
+    );
   }, [selectedQuarter]);
 
   useEffect(() => {
     if (!isEditing) {
       setSelectedSlotId(null);
       setError(null);
+      setDragState(null);
       setSubstitutionDraft(createSubstitutionDraft(selectedQuarter));
     }
   }, [isEditing, selectedQuarter]);
 
-  if (!roster || !plan) {
+  useEffect(() => {
+    setHasUnsavedChanges(false);
+    setDragState(null);
+    setSelectedSlotId(null);
+  }, [plan?.id]);
+
+  const quarterViews = useMemo(() => (roster && plan ? getQuarterViews(roster, plan) : []), [plan, roster]);
+  const activeQuarter = quarterViews.find((quarterView) => quarterView.quarterIndex === selectedQuarter) ?? quarterViews[0] ?? null;
+  const activeQuarterPlan =
+    plan && activeQuarter
+      ? plan.quarterPlans.find((quarterPlan) => quarterPlan.quarterIndex === activeQuarter.quarterIndex) ?? null
+      : null;
+  const stats = useMemo(
+    () => (roster && plan ? calculateFieldPlayCounts(roster, plan) : {}),
+    [plan, roster]
+  );
+  const selectedSlot = activeQuarter?.lineup.find((slot) => slot.slotId === selectedSlotId) ?? null;
+  const selectablePlayers = useMemo(
+    () => (roster ? [...roster.players].sort((left, right) => compareText(left.name, right.name)) : []),
+    [roster]
+  );
+  const benchPlayerIds = new Set(activeQuarter?.bench.map((player) => player.id) ?? []);
+  const sortedPlayers = useMemo(
+    () => (roster ? sortPlayersByFieldPlayCounts(roster.players, stats, sortDirection) : []),
+    [roster, stats, sortDirection]
+  );
+  const quarterSubstitutions = useMemo(
+    () => (roster && plan && activeQuarter ? getQuarterSubstitutionViews(roster, plan, activeQuarter.quarterIndex) : []),
+    [activeQuarter, plan, roster]
+  );
+  const substitutionSlotIds = useMemo(
+    () => (plan && activeQuarter ? getSubstitutionSlotIds(plan, activeQuarter.quarterIndex) : []),
+    [activeQuarter, plan]
+  );
+  const sortedAllSubstitutions = useMemo(
+    () =>
+      [...(plan?.midGameSubstitutions ?? [])].sort((left, right) => {
+        const quarterDiff = left.quarterIndex - right.quarterIndex;
+        if (quarterDiff !== 0) {
+          return quarterDiff;
+        }
+
+        const minuteDiff = left.minuteOffset - right.minuteOffset;
+        if (minuteDiff !== 0) {
+          return minuteDiff;
+        }
+
+        return compareText(left.id, right.id);
+      }),
+    [plan?.midGameSubstitutions]
+  );
+  const shouldShowTemporaryPlacementNotice = useMemo(
+    () =>
+      roster && plan
+        ? hasLoadedTemporaryPlacementNoticePreference &&
+          hasTemporaryPlacementWarnings(roster, plan) &&
+          !isTemporaryPlacementNoticeDismissed
+        : false,
+    [hasLoadedTemporaryPlacementNoticePreference, isTemporaryPlacementNoticeDismissed, plan, roster]
+  );
+
+  useEffect(() => {
+    if (!plan) {
+      setIsTemporaryPlacementNoticeDismissed(false);
+      setHasLoadedTemporaryPlacementNoticePreference(false);
+      return;
+    }
+
+    const dismissed = window.localStorage.getItem(getTemporaryPlacementNoticeKey(plan.id)) === 'true';
+    setIsTemporaryPlacementNoticeDismissed(dismissed);
+    setHasLoadedTemporaryPlacementNoticePreference(true);
+  }, [plan]);
+
+  if (!roster || !plan || !activeQuarter) {
     return (
       <section className="panel">
         <h2>편성 결과</h2>
@@ -77,63 +174,43 @@ export function PlanResults({
     );
   }
 
-  const quarterViews = getQuarterViews(roster, plan);
-  const activeQuarter = quarterViews.find((quarterView) => quarterView.quarterIndex === selectedQuarter) ?? quarterViews[0];
-  const stats = calculateFieldPlayCounts(roster, plan);
-  const selectedSlot = activeQuarter.lineup.find((slot) => slot.slotId === selectedSlotId) ?? null;
-  const selectablePlayers = [...roster.players].sort((left, right) => compareText(left.name, right.name));
-  const benchPlayerIds = new Set(activeQuarter.bench.map((player) => player.id));
-  const sortedPlayers = useMemo(
-    () => sortPlayersByFieldPlayCounts(roster.players, stats, sortDirection),
-    [roster.players, stats, sortDirection]
-  );
-
-  const updateAssignment = (slotId: string, playerId: string) => {
-    const nextQuarterPlans = plan.quarterPlans.map((quarterPlan) =>
-      quarterPlan.quarterIndex === activeQuarter.quarterIndex
-        ? (() => {
-            const currentAssignment = quarterPlan.assignments.find((assignment) => assignment.slotId === slotId);
-            const existingPlayerAssignment = quarterPlan.assignments.find((assignment) => assignment.playerId === playerId);
-
-            return {
-              ...quarterPlan,
-              assignments: quarterPlan.assignments.map((assignment) => {
-                if (assignment.slotId === slotId) {
-                  return { ...assignment, playerId };
-                }
-
-                if (
-                  existingPlayerAssignment &&
-                  currentAssignment &&
-                  assignment.slotId === existingPlayerAssignment.slotId &&
-                  existingPlayerAssignment.slotId !== slotId
-                ) {
-                  return { ...assignment, playerId: currentAssignment.playerId };
-                }
-
-                return assignment;
-              })
-            };
-          })()
-        : quarterPlan
-    );
-
+  const commitPlanChange = (nextPlan: MatchPlan, warnings: string[] = []) => {
+    setHasUnsavedChanges(true);
     onChangePlan(
       {
-        ...plan,
-        quarterPlans: nextQuarterPlans,
+        ...nextPlan,
         updatedAt: nowIso()
       },
-      []
+      warnings
     );
   };
 
-  const toggleLock = (slotId: string) => {
-    const nextQuarterPlans = plan.quarterPlans.map((quarterPlan) => {
-      if (quarterPlan.quarterIndex !== activeQuarter.quarterIndex) {
-        return quarterPlan;
-      }
+  const updateActiveQuarterPlan = (transform: (quarterPlan: QuarterPlan) => QuarterPlan) => {
+    if (!activeQuarterPlan) {
+      return;
+    }
 
+    const nextQuarterPlan = transform(activeQuarterPlan);
+    if (nextQuarterPlan === activeQuarterPlan) {
+      return;
+    }
+
+    const nextQuarterPlans = plan.quarterPlans.map((quarterPlan) =>
+      quarterPlan.quarterIndex === activeQuarter.quarterIndex ? nextQuarterPlan : quarterPlan
+    );
+
+    commitPlanChange({
+      ...plan,
+      quarterPlans: nextQuarterPlans
+    });
+  };
+
+  const updateAssignment = (slotId: string, playerId: string) => {
+    updateActiveQuarterPlan((quarterPlan) => assignPlayerToSlot(quarterPlan, slotId, playerId));
+  };
+
+  const toggleLock = (slotId: string) => {
+    updateActiveQuarterPlan((quarterPlan) => {
       const isLocked = quarterPlan.lockedSlotIds.includes(slotId);
       return {
         ...quarterPlan,
@@ -142,20 +219,16 @@ export function PlanResults({
           : [...quarterPlan.lockedSlotIds, slotId]
       };
     });
-
-    onChangePlan(
-      {
-        ...plan,
-        quarterPlans: nextQuarterPlans,
-        updatedAt: nowIso()
-      },
-      []
-    );
   };
 
   const handleRecalculate = () => {
     const result = recalculateMatchPlan(roster, plan);
-    onChangePlan(result.matchPlan, result.warnings.map((warning) => warning.message));
+    commitPlanChange(result.matchPlan, result.warnings.map((warning) => warning.message));
+  };
+
+  const handleSaveCurrentPlan = () => {
+    onSavePlan(plan);
+    setHasUnsavedChanges(false);
   };
 
   const handleSaveSubstitution = () => {
@@ -179,11 +252,10 @@ export function PlanResults({
       ...plan,
       midGameSubstitutions: substitutionDraft.id
         ? plan.midGameSubstitutions.map((item) => (item.id === substitutionDraft.id ? nextSubstitution : item))
-        : [...plan.midGameSubstitutions, nextSubstitution],
-      updatedAt: nowIso()
+        : [...plan.midGameSubstitutions, nextSubstitution]
     };
 
-    onChangePlan(nextPlan, []);
+    commitPlanChange(nextPlan);
     setSubstitutionDraft(createSubstitutionDraft(selectedQuarter));
     setError(null);
   };
@@ -202,14 +274,63 @@ export function PlanResults({
   };
 
   const handleDeleteSubstitution = (substitutionId: string) => {
-    onChangePlan(
-      {
-        ...plan,
-        midGameSubstitutions: plan.midGameSubstitutions.filter((item) => item.id !== substitutionId),
-        updatedAt: nowIso()
-      },
-      []
+    commitPlanChange({
+      ...plan,
+      midGameSubstitutions: plan.midGameSubstitutions.filter((item) => item.id !== substitutionId)
+    });
+  };
+
+  const handleDragStart = (item: BoardDragItem, point: { x: number; y: number }) => {
+    setDragState({
+      item,
+      x: point.x,
+      y: point.y,
+      overSlotId: item.type === 'slot' ? item.slotId : null
+    });
+  };
+
+  const handleDragMove = (point: { x: number; y: number }, overSlotId: string | null) => {
+    setDragState((current) =>
+      current
+        ? {
+            ...current,
+            x: point.x,
+            y: point.y,
+            overSlotId
+          }
+        : current
     );
+  };
+
+  const handleDragEnd = () => {
+    setDragState(null);
+  };
+
+  const handleDropOnSlot = (targetSlotId: string | null) => {
+    if (!dragState || !activeQuarterPlan || !targetSlotId) {
+      setDragState(null);
+      return;
+    }
+
+    const nextQuarterPlan = applyDragItemToQuarterPlan(activeQuarterPlan, dragState.item, targetSlotId);
+    if (nextQuarterPlan !== activeQuarterPlan) {
+      const nextQuarterPlans = plan.quarterPlans.map((quarterPlan) =>
+        quarterPlan.quarterIndex === activeQuarter.quarterIndex ? nextQuarterPlan : quarterPlan
+      );
+
+      commitPlanChange({
+        ...plan,
+        quarterPlans: nextQuarterPlans
+      });
+      setSelectedSlotId(targetSlotId);
+    }
+
+    setDragState(null);
+  };
+
+  const handleDismissTemporaryPlacementNotice = () => {
+    window.localStorage.setItem(getTemporaryPlacementNoticeKey(plan.id), 'true');
+    setIsTemporaryPlacementNoticeDismissed(true);
   };
 
   return (
@@ -222,10 +343,15 @@ export function PlanResults({
           </p>
         </div>
         <div className="button-row">
-          <button type="button" className={isEditing ? 'tab-button tab-active' : 'secondary-button'} onClick={() => setIsEditing((current) => !current)}>
+          {hasUnsavedChanges ? <span className="status-pill status-pill--dirty">저장 전 변경 있음</span> : null}
+          <button
+            type="button"
+            className={isEditing ? 'tab-button tab-active' : 'secondary-button'}
+            onClick={() => setIsEditing((current) => !current)}
+          >
             {isEditing ? '수정 종료' : '수정'}
           </button>
-          <button type="button" className="secondary-button" onClick={() => onSavePlan(plan)}>
+          <button type="button" className="secondary-button" onClick={handleSaveCurrentPlan}>
             저장
           </button>
         </div>
@@ -244,22 +370,56 @@ export function PlanResults({
         ))}
       </div>
 
-      {activeQuarter.warnings.length > 0 ? (
-        <div className="warning-list">
-          {activeQuarter.warnings.map((warning) => (
-            <p key={`${warning.quarterIndex}-${warning.slotId}`} className="warning-text">
-              {warning.message}
-            </p>
-          ))}
+      {shouldShowTemporaryPlacementNotice ? (
+        <div className="notice notice-warning notice-dismissible">
+          <div>
+            <strong>임시 배치 안내</strong>
+            <p className="muted">일부 포지션은 적합 선수가 부족해 임시 배치로 편성되었습니다.</p>
+          </div>
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={handleDismissTemporaryPlacementNotice}
+          >
+            닫기
+          </button>
         </div>
       ) : null}
+
+      <div className="substitution-summary">
+        <div className="substitution-summary__header">
+          <h3>현재 쿼터 교체</h3>
+          <span>{activeQuarter.quarterIndex}Q 기준</span>
+        </div>
+        <div className="substitution-summary__chips">
+          {quarterSubstitutions.length > 0 ? (
+            quarterSubstitutions.map((substitution) => (
+              <span key={substitution.id} className="substitution-chip">
+                {substitution.minuteOffset}'
+                {substitution.slotLabel ? ` ${substitution.slotLabel} ·` : ''}
+                {' '}
+                {substitution.outPlayerName} OUT / {substitution.inPlayerName} IN
+              </span>
+            ))
+          ) : (
+            <p className="muted">현재 쿼터에 등록된 교체가 없습니다.</p>
+          )}
+        </div>
+      </div>
 
       <LineupBoard
         plan={plan}
         quarterView={activeQuarter}
+        benchPlayers={activeQuarter.bench}
+        substitutionSlotIds={substitutionSlotIds}
         isEditing={isEditing}
         selectedSlotId={selectedSlotId}
+        dragState={dragState}
         onSelectSlot={setSelectedSlotId}
+        onDragStart={handleDragStart}
+        onDragMove={handleDragMove}
+        onDropOnSlot={handleDropOnSlot}
+        onDragEnd={handleDragEnd}
       />
 
       {isEditing ? (
@@ -276,7 +436,7 @@ export function PlanResults({
               <div className="editor-row">
                 <div>
                   <strong>{selectedSlot.label}</strong>
-                  <p className="muted">현재 배치: {selectedSlot.player?.name ?? '미배정'}</p>
+                  <p className="muted">현재 배치: {selectedSlot.player?.name ?? '미배치'}</p>
                 </div>
                 <label className="toggle-lock">
                   <input
@@ -303,7 +463,7 @@ export function PlanResults({
               </label>
             </article>
           ) : (
-            <p className="muted">수정하려는 선수 마커를 선택하세요.</p>
+            <p className="muted">수정할 포지션을 보드에서 선택하거나 드래그로 바로 교체하세요.</p>
           )}
 
           <div className="subsection">
@@ -347,7 +507,7 @@ export function PlanResults({
 
             <div className="grid-two">
               <label className="field">
-                <span>교체 아웃</span>
+                <span>필드 OUT</span>
                 <select
                   value={substitutionDraft.outPlayerId}
                   onChange={(event) => setSubstitutionDraft({ ...substitutionDraft, outPlayerId: event.target.value })}
@@ -362,7 +522,7 @@ export function PlanResults({
               </label>
 
               <label className="field">
-                <span>교체 인</span>
+                <span>벤치 IN</span>
                 <select
                   value={substitutionDraft.inPlayerId}
                   onChange={(event) => setSubstitutionDraft({ ...substitutionDraft, inPlayerId: event.target.value })}
@@ -378,7 +538,7 @@ export function PlanResults({
             </div>
 
             <label className="field">
-              <span>관련 슬롯</span>
+              <span>관련 포지션</span>
               <select
                 value={substitutionDraft.slotId}
                 onChange={(event) => setSubstitutionDraft({ ...substitutionDraft, slotId: event.target.value })}
@@ -408,11 +568,11 @@ export function PlanResults({
             </button>
 
             <div className="stack">
-              {plan.midGameSubstitutions.map((substitution) => (
+              {sortedAllSubstitutions.map((substitution) => (
                 <article key={substitution.id} className="list-card">
                   <div>
                     <strong>
-                      {substitution.quarterIndex}Q {substitution.minuteOffset}분
+                      {substitution.quarterIndex}Q {substitution.minuteOffset}'
                     </strong>
                     <p className="muted">
                       {roster.players.find((player) => player.id === substitution.outPlayerId)?.name} OUT /{' '}
@@ -431,23 +591,11 @@ export function PlanResults({
                   </div>
                 </article>
               ))}
-              {plan.midGameSubstitutions.length === 0 ? <p className="muted">등록된 중간 교체가 없습니다.</p> : null}
+              {sortedAllSubstitutions.length === 0 ? <p className="muted">등록된 중간 교체가 없습니다.</p> : null}
             </div>
           </div>
         </div>
-      ) : null}
-
-      <div className="subsection">
-        <h3>벤치</h3>
-        <div className="chips">
-          {activeQuarter.bench.map((player) => (
-            <span key={player.id} className="chip chip-static">
-              {player.name}
-            </span>
-          ))}
-          {activeQuarter.bench.length === 0 ? <p className="muted">벤치 선수가 없습니다.</p> : null}
-        </div>
-      </div>
+        ) : null}
 
       <div className="subsection">
         <div className="panel-header">
@@ -468,8 +616,13 @@ export function PlanResults({
                 <div>
                   <strong className="player-status-card__name">{player.name}</strong>
                   <p className="muted player-status-card__meta">
-                    필드 출전 {playerStats.fieldPlayQuarters}쿼터
-                    {playerStats.temporaryGkQuarters > 0 ? ` / 임시 GK ${playerStats.temporaryGkQuarters}쿼터` : ''}
+                    {[
+                      `필드 출전 ${playerStats.fieldPlayQuarters}쿼터`,
+                      playerStats.temporaryGkQuarters > 0 ? `임시 GK ${playerStats.temporaryGkQuarters}쿼터` : null,
+                      playerStats.substitutionQuarters > 0 ? `교체 ${playerStats.substitutionQuarters}쿼터` : null
+                    ]
+                      .filter(Boolean)
+                      .join(' / ')}
                   </p>
                 </div>
                 <span className="badge">{player.primaryPosition === 'GK' ? '주 GK' : '필드'}</span>
