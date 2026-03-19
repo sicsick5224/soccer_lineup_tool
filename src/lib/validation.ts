@@ -1,4 +1,3 @@
-import { QUARTER_DURATION_MINUTES } from '../constants/formations';
 import type { MidGameSubstitution, TeamRoster } from '../types/domain';
 
 export function validateRoster(rosterName: string, playerNames: string[]): string | null {
@@ -34,7 +33,7 @@ export function validatePlanTitle(title: string): string | null {
 }
 
 export function validateSubstitution(
-  substitution: Pick<MidGameSubstitution, 'minuteOffset' | 'outPlayerId' | 'inPlayerId'>,
+  substitution: Pick<MidGameSubstitution, 'outPlayerId' | 'inPlayerId'>,
   roster: TeamRoster
 ): string | null {
   if (!substitution.outPlayerId || !substitution.inPlayerId) {
@@ -43,10 +42,6 @@ export function validateSubstitution(
 
   if (substitution.outPlayerId === substitution.inPlayerId) {
     return '교체 대상 선수와 투입 선수는 같을 수 없습니다.';
-  }
-
-  if (substitution.minuteOffset < 0 || substitution.minuteOffset > QUARTER_DURATION_MINUTES) {
-    return '교체 시간은 해당 쿼터 기준 0분에서 25분 사이여야 합니다.';
   }
 
   const rosterPlayerIds = new Set(roster.players.map((player) => player.id));

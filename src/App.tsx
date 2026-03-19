@@ -95,16 +95,6 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <header className="hero">
-        <div>
-          <p className="eyebrow">Soccer Lineup Tool MVP</p>
-          <h1>조기축구 포지션 배치 / 출전 시간 분배</h1>
-          <p className="hero-copy">
-            팀 명단 저장, 4쿼터 자동 편성, GK 후보 지정, 수동 수정, 중간 교체 관리까지 모바일에서 바로 처리합니다.
-          </p>
-        </div>
-      </header>
-
       <nav className="tab-row main-tabs">
         <button type="button" className={`tab-button ${activeView === 'rosters' ? 'tab-active' : ''}`} onClick={() => setActiveView('rosters')}>
           팀 명단

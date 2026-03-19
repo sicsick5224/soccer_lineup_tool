@@ -12,13 +12,14 @@ interface LineupBoardProps {
   selectedSlotId: string | null;
   dragState: BoardDragState | null;
   onSelectSlot: (slotId: string) => void;
+  onSelectBenchPlayer: (playerId: string) => void;
   onDragStart: (item: BoardDragItem, point: { x: number; y: number }) => void;
   onDragMove: (point: { x: number; y: number }, overSlotId: string | null) => void;
   onDropOnSlot: (slotId: string | null) => void;
   onDragEnd: () => void;
 }
 
-const DRAG_THRESHOLD_PX = 6;
+const DRAG_THRESHOLD_PX = 16;
 
 export function LineupBoard({
   plan,
@@ -29,6 +30,7 @@ export function LineupBoard({
   selectedSlotId,
   dragState,
   onSelectSlot,
+  onSelectBenchPlayer,
   onDragStart,
   onDragMove,
   onDropOnSlot,
@@ -85,6 +87,8 @@ export function LineupBoard({
       if (pendingDrag && event.pointerId === pendingDrag.pointerId) {
         if (pendingDrag.item.type === 'slot') {
           onSelectSlot(pendingDrag.item.slotId);
+        } else {
+          onSelectBenchPlayer(pendingDrag.item.playerId);
         }
         pendingDragRef.current = null;
         return;
@@ -94,7 +98,7 @@ export function LineupBoard({
         return;
       }
 
-      onDropOnSlot(getSlotIdFromPoint(event.clientX, event.clientY));
+      onDropOnSlot(dragState.overSlotId ?? getSlotIdFromPoint(event.clientX, event.clientY));
     };
 
     const handlePointerCancel = () => {
@@ -113,7 +117,7 @@ export function LineupBoard({
       window.removeEventListener('pointerup', handlePointerUp);
       window.removeEventListener('pointercancel', handlePointerCancel);
     };
-  }, [dragState, isEditing, onDragEnd, onDragMove, onDragStart, onDropOnSlot, onSelectSlot]);
+  }, [dragState, isEditing, onDragEnd, onDragMove, onDragStart, onDropOnSlot, onSelectBenchPlayer, onSelectSlot]);
 
   const handlePointerDown = (event: ReactPointerEvent, item: BoardDragItem) => {
     if (!isEditing) {

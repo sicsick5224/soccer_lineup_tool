@@ -36,22 +36,18 @@ interface PlanResultsProps {
 type SubstitutionDraft = {
   id: string;
   quarterIndex: QuarterIndex;
-  minuteOffset: number;
   outPlayerId: string;
   inPlayerId: string;
   slotId: string;
-  note: string;
 };
 
 function createSubstitutionDraft(quarterIndex: QuarterIndex): SubstitutionDraft {
   return {
     id: '',
     quarterIndex,
-    minuteOffset: 0,
     outPlayerId: '',
     inPlayerId: '',
-    slotId: '',
-    note: ''
+    slotId: ''
   };
 }
 
@@ -74,6 +70,8 @@ export function PlanResults({
   const [error, setError] = useState<string | null>(null);
   const [dragState, setDragState] = useState<BoardDragState | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [isPlayerStatusCollapsed, setIsPlayerStatusCollapsed] = useState(true);
+  const [isSubstitutionManagerCollapsed, setIsSubstitutionManagerCollapsed] = useState(true);
   const [isTemporaryPlacementNoticeDismissed, setIsTemporaryPlacementNoticeDismissed] = useState(false);
   const [hasLoadedTemporaryPlacementNoticePreference, setHasLoadedTemporaryPlacementNoticePreference] = useState(false);
 
@@ -89,6 +87,7 @@ export function PlanResults({
       setError(null);
       setDragState(null);
       setSubstitutionDraft(createSubstitutionDraft(selectedQuarter));
+      setIsSubstitutionManagerCollapsed(true);
     }
   }, [isEditing, selectedQuarter]);
 
@@ -96,6 +95,8 @@ export function PlanResults({
     setHasUnsavedChanges(false);
     setDragState(null);
     setSelectedSlotId(null);
+    setIsPlayerStatusCollapsed(true);
+    setIsSubstitutionManagerCollapsed(true);
   }, [plan?.id]);
 
   const quarterViews = useMemo(() => (roster && plan ? getQuarterViews(roster, plan) : []), [plan, roster]);
@@ -209,6 +210,47 @@ export function PlanResults({
     updateActiveQuarterPlan((quarterPlan) => assignPlayerToSlot(quarterPlan, slotId, playerId));
   };
 
+  const handleSelectSlot = (slotId: string) => {
+    setSelectedSlotId(slotId);
+
+    if (!isEditing) {
+      return;
+    }
+
+    const slot = activeQuarter.lineup.find((lineupSlot) => lineupSlot.slotId === slotId);
+    if (!slot?.player) {
+      return;
+    }
+    const player = slot.player;
+
+    setSubstitutionDraft((currentDraft) => {
+      if (currentDraft.outPlayerId === player.id && currentDraft.slotId === slot.slotId) {
+        return currentDraft;
+      }
+
+      return {
+        ...currentDraft,
+        outPlayerId: player.id,
+        slotId: slot.slotId
+      };
+    });
+  };
+
+  const handleSelectBenchPlayer = (playerId: string) => {
+    if (!isEditing) {
+      return;
+    }
+
+    setSubstitutionDraft((currentDraft) =>
+      currentDraft.inPlayerId === playerId
+        ? currentDraft
+        : {
+            ...currentDraft,
+            inPlayerId: playerId
+          }
+    );
+  };
+
   const toggleLock = (slotId: string) => {
     updateActiveQuarterPlan((quarterPlan) => {
       const isLocked = quarterPlan.lockedSlotIds.includes(slotId);
@@ -238,14 +280,18 @@ export function PlanResults({
       return;
     }
 
+    const existingSubstitution = substitutionDraft.id
+      ? plan.midGameSubstitutions.find((item) => item.id === substitutionDraft.id)
+      : undefined;
+
     const nextSubstitution: MidGameSubstitution = {
       id: substitutionDraft.id || createId('sub'),
       quarterIndex: substitutionDraft.quarterIndex,
-      minuteOffset: substitutionDraft.minuteOffset,
+      minuteOffset: existingSubstitution?.minuteOffset ?? 0,
       outPlayerId: substitutionDraft.outPlayerId,
       inPlayerId: substitutionDraft.inPlayerId,
       slotId: substitutionDraft.slotId || undefined,
-      note: substitutionDraft.note.trim() || undefined
+      note: existingSubstitution?.note
     };
 
     const nextPlan = {
@@ -264,13 +310,12 @@ export function PlanResults({
     setSubstitutionDraft({
       id: substitution.id,
       quarterIndex: substitution.quarterIndex,
-      minuteOffset: substitution.minuteOffset,
       outPlayerId: substitution.outPlayerId,
       inPlayerId: substitution.inPlayerId,
-      slotId: substitution.slotId ?? '',
-      note: substitution.note ?? ''
+      slotId: substitution.slotId ?? ''
     });
     setError(null);
+    setIsSubstitutionManagerCollapsed(false);
   };
 
   const handleDeleteSubstitution = (substitutionId: string) => {
@@ -334,7 +379,7 @@ export function PlanResults({
   };
 
   return (
-    <section className="panel">
+    <section className="panel results-panel">
       <div className="panel-header">
         <div>
           <h2>편성 결과</h2>
@@ -342,32 +387,25 @@ export function PlanResults({
             {plan.title} / {plan.formation}
           </p>
         </div>
-        <div className="button-row">
-          {hasUnsavedChanges ? <span className="status-pill status-pill--dirty">저장 전 변경 있음</span> : null}
-          <button
-            type="button"
-            className={isEditing ? 'tab-button tab-active' : 'secondary-button'}
-            onClick={() => setIsEditing((current) => !current)}
-          >
-            {isEditing ? '수정 종료' : '수정'}
-          </button>
-          <button type="button" className="secondary-button" onClick={handleSaveCurrentPlan}>
-            저장
-          </button>
+        <div className="results-header-actions">
+          <div className="results-header-actions__buttons">
+            <button
+              type="button"
+              className={isEditing ? 'tab-button tab-active' : 'secondary-button'}
+              onClick={() => setIsEditing((current) => !current)}
+            >
+              {isEditing ? '수정 종료' : '수정'}
+            </button>
+            <button type="button" className="secondary-button" onClick={handleSaveCurrentPlan}>
+              저장
+            </button>
+          </div>
+          {hasUnsavedChanges ? (
+            <div className="results-header-actions__status">
+              <span className="status-pill status-pill--dirty">저장 전 변경 있음</span>
+            </div>
+          ) : null}
         </div>
-      </div>
-
-      <div className="tab-row">
-        {quarterViews.map((quarterView) => (
-          <button
-            key={quarterView.quarterIndex}
-            type="button"
-            className={`tab-button ${quarterView.quarterIndex === activeQuarter.quarterIndex ? 'tab-active' : ''}`}
-            onClick={() => onSelectQuarter(quarterView.quarterIndex)}
-          >
-            {quarterView.quarterIndex}Q
-          </button>
-        ))}
       </div>
 
       {shouldShowTemporaryPlacementNotice ? (
@@ -386,25 +424,17 @@ export function PlanResults({
         </div>
       ) : null}
 
-      <div className="substitution-summary">
-        <div className="substitution-summary__header">
-          <h3>현재 쿼터 교체</h3>
-          <span>{activeQuarter.quarterIndex}Q 기준</span>
-        </div>
-        <div className="substitution-summary__chips">
-          {quarterSubstitutions.length > 0 ? (
-            quarterSubstitutions.map((substitution) => (
-              <span key={substitution.id} className="substitution-chip">
-                {substitution.minuteOffset}'
-                {substitution.slotLabel ? ` ${substitution.slotLabel} ·` : ''}
-                {' '}
-                {substitution.outPlayerName} OUT / {substitution.inPlayerName} IN
-              </span>
-            ))
-          ) : (
-            <p className="muted">현재 쿼터에 등록된 교체가 없습니다.</p>
-          )}
-        </div>
+      <div className="tab-row results-quarter-tabs">
+        {quarterViews.map((quarterView) => (
+          <button
+            key={quarterView.quarterIndex}
+            type="button"
+            className={`tab-button ${quarterView.quarterIndex === activeQuarter.quarterIndex ? 'tab-active' : ''}`}
+            onClick={() => onSelectQuarter(quarterView.quarterIndex)}
+          >
+            {quarterView.quarterIndex}Q
+          </button>
+        ))}
       </div>
 
       <LineupBoard
@@ -415,12 +445,32 @@ export function PlanResults({
         isEditing={isEditing}
         selectedSlotId={selectedSlotId}
         dragState={dragState}
-        onSelectSlot={setSelectedSlotId}
+        onSelectSlot={handleSelectSlot}
+        onSelectBenchPlayer={handleSelectBenchPlayer}
         onDragStart={handleDragStart}
         onDragMove={handleDragMove}
         onDropOnSlot={handleDropOnSlot}
         onDragEnd={handleDragEnd}
       />
+
+      <div className="substitution-summary substitution-summary--compact">
+        <div className="substitution-summary__header">
+          <h3>현재 쿼터 교체</h3>
+          <span>{activeQuarter.quarterIndex}Q 기준</span>
+        </div>
+        <div className="substitution-summary__chips">
+          {quarterSubstitutions.length > 0 ? (
+            quarterSubstitutions.map((substitution) => (
+              <span key={substitution.id} className="substitution-chip">
+                {substitution.slotLabel ? `${substitution.slotLabel} · ` : ''}
+                {substitution.outPlayerName} OUT / {substitution.inPlayerName} IN
+              </span>
+            ))
+          ) : (
+            <p className="muted substitution-summary__empty">현재 쿼터 교체 없음</p>
+          )}
+        </div>
+      </div>
 
       {isEditing ? (
         <div className="subsection">
@@ -467,169 +517,168 @@ export function PlanResults({
           )}
 
           <div className="subsection">
-            <h3>중간 교체 관리</h3>
-            <div className="grid-two">
-              <label className="field">
-                <span>쿼터</span>
-                <select
-                  value={substitutionDraft.quarterIndex}
-                  onChange={(event) =>
-                    setSubstitutionDraft({
-                      ...substitutionDraft,
-                      quarterIndex: Number(event.target.value) as QuarterIndex
-                    })
-                  }
-                >
-                  {[1, 2, 3, 4].map((quarterIndex) => (
-                    <option key={quarterIndex} value={quarterIndex}>
-                      {quarterIndex}Q
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="field">
-                <span>분</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={plan.quarterDurationMinutes}
-                  value={substitutionDraft.minuteOffset}
-                  onChange={(event) =>
-                    setSubstitutionDraft({
-                      ...substitutionDraft,
-                      minuteOffset: Number(event.target.value)
-                    })
-                  }
-                />
-              </label>
-            </div>
-
-            <div className="grid-two">
-              <label className="field">
-                <span>필드 OUT</span>
-                <select
-                  value={substitutionDraft.outPlayerId}
-                  onChange={(event) => setSubstitutionDraft({ ...substitutionDraft, outPlayerId: event.target.value })}
-                >
-                  <option value="">선수 선택</option>
-                  {roster.players.map((player) => (
-                    <option key={player.id} value={player.id}>
-                      {player.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="field">
-                <span>벤치 IN</span>
-                <select
-                  value={substitutionDraft.inPlayerId}
-                  onChange={(event) => setSubstitutionDraft({ ...substitutionDraft, inPlayerId: event.target.value })}
-                >
-                  <option value="">선수 선택</option>
-                  {roster.players.map((player) => (
-                    <option key={player.id} value={player.id}>
-                      {player.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <label className="field">
-              <span>관련 포지션</span>
-              <select
-                value={substitutionDraft.slotId}
-                onChange={(event) => setSubstitutionDraft({ ...substitutionDraft, slotId: event.target.value })}
+            <div className="panel-header">
+              <button
+                type="button"
+                className="section-toggle"
+                onClick={() => setIsSubstitutionManagerCollapsed((current) => !current)}
               >
-                <option value="">선택 안 함</option>
-                {activeQuarter.lineup.map((slot) => (
-                  <option key={slot.slotId} value={slot.slotId}>
-                    {slot.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="field">
-              <span>메모</span>
-              <input
-                value={substitutionDraft.note}
-                onChange={(event) => setSubstitutionDraft({ ...substitutionDraft, note: event.target.value })}
-                placeholder="예: 체력 안배"
-              />
-            </label>
-
-            {error ? <p className="error-text">{error}</p> : null}
-
-            <button type="button" onClick={handleSaveSubstitution}>
-              {substitutionDraft.id ? '교체 수정 완료' : '중간 교체 추가'}
-            </button>
-
-            <div className="stack">
-              {sortedAllSubstitutions.map((substitution) => (
-                <article key={substitution.id} className="list-card">
-                  <div>
-                    <strong>
-                      {substitution.quarterIndex}Q {substitution.minuteOffset}'
-                    </strong>
-                    <p className="muted">
-                      {roster.players.find((player) => player.id === substitution.outPlayerId)?.name} OUT /{' '}
-                      {roster.players.find((player) => player.id === substitution.inPlayerId)?.name} IN
-                      {substitution.slotId ? ` / ${substitution.slotId}` : ''}
-                    </p>
-                    {substitution.note ? <p className="muted">{substitution.note}</p> : null}
-                  </div>
-                  <div className="button-row">
-                    <button type="button" className="secondary-button" onClick={() => handleEditSubstitution(substitution)}>
-                      수정
-                    </button>
-                    <button type="button" className="danger-button" onClick={() => handleDeleteSubstitution(substitution.id)}>
-                      삭제
-                    </button>
-                  </div>
-                </article>
-              ))}
-              {sortedAllSubstitutions.length === 0 ? <p className="muted">등록된 중간 교체가 없습니다.</p> : null}
+                <span>중간 교체 관리</span>
+                <span className="section-toggle__meta">{isSubstitutionManagerCollapsed ? '펼치기' : '접기'}</span>
+              </button>
             </div>
+
+            {!isSubstitutionManagerCollapsed ? (
+              <>
+                <div className="grid-two">
+                  <label className="field">
+                    <span>쿼터</span>
+                    <select
+                      value={substitutionDraft.quarterIndex}
+                      onChange={(event) =>
+                        setSubstitutionDraft({
+                          ...substitutionDraft,
+                          quarterIndex: Number(event.target.value) as QuarterIndex
+                        })
+                      }
+                    >
+                      {[1, 2, 3, 4].map((quarterIndex) => (
+                        <option key={quarterIndex} value={quarterIndex}>
+                          {quarterIndex}Q
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="field">
+                    <span>관련 포지션</span>
+                    <select
+                      value={substitutionDraft.slotId}
+                      onChange={(event) => setSubstitutionDraft({ ...substitutionDraft, slotId: event.target.value })}
+                    >
+                      <option value="">선택 안 함</option>
+                      {activeQuarter.lineup.map((slot) => (
+                        <option key={slot.slotId} value={slot.slotId}>
+                          {slot.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="grid-two">
+                  <label className="field">
+                    <span>필드 OUT</span>
+                    <select
+                      value={substitutionDraft.outPlayerId}
+                      onChange={(event) => setSubstitutionDraft({ ...substitutionDraft, outPlayerId: event.target.value })}
+                    >
+                      <option value="">선수 선택</option>
+                      {roster.players.map((player) => (
+                        <option key={player.id} value={player.id}>
+                          {player.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="field">
+                    <span>벤치 IN</span>
+                    <select
+                      value={substitutionDraft.inPlayerId}
+                      onChange={(event) => setSubstitutionDraft({ ...substitutionDraft, inPlayerId: event.target.value })}
+                    >
+                      <option value="">선수 선택</option>
+                      {roster.players.map((player) => (
+                        <option key={player.id} value={player.id}>
+                          {player.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                {error ? <p className="error-text">{error}</p> : null}
+
+                <button type="button" onClick={handleSaveSubstitution}>
+                  {substitutionDraft.id ? '교체 수정 완료' : '중간 교체 추가'}
+                </button>
+
+                <div className="stack">
+                  {sortedAllSubstitutions.map((substitution) => (
+                    <article key={substitution.id} className="list-card">
+                      <div>
+                        <strong>{substitution.quarterIndex}Q</strong>
+                        <p className="muted">
+                          {roster.players.find((player) => player.id === substitution.outPlayerId)?.name} OUT /{' '}
+                          {roster.players.find((player) => player.id === substitution.inPlayerId)?.name} IN
+                          {substitution.slotId ? ` / ${substitution.slotId}` : ''}
+                        </p>
+                      </div>
+                      <div className="button-row">
+                        <button type="button" className="secondary-button" onClick={() => handleEditSubstitution(substitution)}>
+                          수정
+                        </button>
+                        <button type="button" className="danger-button" onClick={() => handleDeleteSubstitution(substitution.id)}>
+                          삭제
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                  {sortedAllSubstitutions.length === 0 ? <p className="muted">등록된 중간 교체가 없습니다.</p> : null}
+                </div>
+              </>
+            ) : null}
           </div>
         </div>
         ) : null}
 
-      <div className="subsection">
+      <div className="subsection player-status-section">
         <div className="panel-header">
-          <h3>선수별 출전 현황</h3>
-          <label className="inline-field">
-            <span>정렬</span>
-            <select value={sortDirection} onChange={(event) => setSortDirection(event.target.value as PlayerStatsSortDirection)}>
-              <option value="field-desc">출전 쿼터 많은 순</option>
-              <option value="field-asc">출전 쿼터 적은 순</option>
-            </select>
-          </label>
+          <button
+            type="button"
+            className="section-toggle"
+            onClick={() => setIsPlayerStatusCollapsed((current) => !current)}
+          >
+            <span>선수별 출전 현황</span>
+            <span className="section-toggle__meta">
+              {sortDirection === 'field-desc' ? '출전 많은 순' : '출전 적은 순'} / {isPlayerStatusCollapsed ? '펼치기' : '접기'}
+            </span>
+          </button>
         </div>
-        <div className="stack">
-          {sortedPlayers.map((player) => {
-            const playerStats = stats[player.id];
-            return (
-              <article key={player.id} className="list-card player-status-card">
-                <div>
-                  <strong className="player-status-card__name">{player.name}</strong>
-                  <p className="muted player-status-card__meta">
-                    {[
-                      `필드 출전 ${playerStats.fieldPlayQuarters}쿼터`,
-                      playerStats.temporaryGkQuarters > 0 ? `임시 GK ${playerStats.temporaryGkQuarters}쿼터` : null,
-                      playerStats.substitutionQuarters > 0 ? `교체 ${playerStats.substitutionQuarters}쿼터` : null
-                    ]
-                      .filter(Boolean)
-                      .join(' / ')}
-                  </p>
-                </div>
-                <span className="badge">{player.primaryPosition === 'GK' ? '주 GK' : '필드'}</span>
-              </article>
-            );
-          })}
-        </div>
+        {!isPlayerStatusCollapsed ? (
+          <>
+            <label className="inline-field player-status-section__sort">
+              <span>정렬</span>
+              <select value={sortDirection} onChange={(event) => setSortDirection(event.target.value as PlayerStatsSortDirection)}>
+                <option value="field-desc">출전 쿼터 많은 순</option>
+                <option value="field-asc">출전 쿼터 적은 순</option>
+              </select>
+            </label>
+            <div className="stack">
+              {sortedPlayers.map((player) => {
+                const playerStats = stats[player.id];
+                return (
+                  <article key={player.id} className="list-card player-status-card">
+                    <div>
+                      <strong className="player-status-card__name">{player.name}</strong>
+                      <p className="muted player-status-card__meta">
+                        {[
+                          `필드 출전 ${playerStats.fieldPlayQuarters}쿼터`,
+                          playerStats.temporaryGkQuarters > 0 ? `임시 GK ${playerStats.temporaryGkQuarters}쿼터` : null,
+                          playerStats.substitutionQuarters > 0 ? `교체 ${playerStats.substitutionQuarters}쿼터` : null
+                        ]
+                          .filter(Boolean)
+                          .join(' / ')}
+                      </p>
+                    </div>
+                    <span className="badge">{player.primaryPosition === 'GK' ? '주 GK' : '필드'}</span>
+                  </article>
+                );
+              })}
+            </div>
+          </>
+        ) : null}
       </div>
     </section>
   );
